@@ -1,18 +1,17 @@
 import { mainLog } from "./log";
-import { Numerator, NumeratorOption, PushNumerator } from "./numerator";
+import { Numerator, NumeratorOption } from "./numerator";
 
 export interface NumeratorClusterOption<T> {
   /** 以毫秒记的任务检测定时器间隔 */
   taskSeekInterval: number;
-  /** 以毫秒记的睡眠检测定时器间隔 */
-  sleepStudiesInterval: number;
   /** 负荷容量 */
   loadSize: number;
-  /** 分子任务获取机器 */
-  numeratorClusterFactory(): Promise<NumeratorOption<T>>;
+  /** 分子任务获取 */
+  producer(): Promise<Omit<NumeratorOption<T>, "timer" | "failQueue" | "lastRunTime"> | void>;
   /** 更新分子信息 */
-  pushNumerator: PushNumerator<T>;
-  performListener(particle: number, context: T): Promise<boolean>;
+  pushState(option: NumeratorOption<T>): Promise<boolean>;
+  /** 分子消费 */
+  consumer(particle: number, context: T): Promise<boolean>;
 }
 
 export type NumeratorClusterStateType = "init" | "running" | "pause" | "stop";
@@ -33,11 +32,10 @@ export class NumeratorCluster<T> {
 
   public option!: NumeratorClusterOption<T>;
 
-  constructor(option: Pick<NumeratorClusterOption<T>, "numeratorClusterFactory" | "pushNumerator" | "performListener">) {
+  constructor(option: Pick<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState">) {
     log.info("numerator cluster init...");
     this.option = {
-      sleepStudiesInterval: 1000 * 60, // 1min
-      taskSeekInterval: 10, // 10ms
+      taskSeekInterval: 1000, // 1s
       loadSize: 100,
       ...option,
     };
@@ -45,7 +43,10 @@ export class NumeratorCluster<T> {
 
   public run() {
     this._state = "running";
-    this._timeout = setInterval(this.interval.bind(this), this.option.sleepStudiesInterval);
+    new Numerator(this);
+    this._timeout = setInterval(() => {
+      new Numerator(this);
+    }, this.option.taskSeekInterval);
 
     log.info("Set state running");
 
@@ -68,12 +69,6 @@ export class NumeratorCluster<T> {
     }
     log.info("Set state stop");
     return this;
-  }
-
-  public onAcquiredNumerator() {}
-
-  private interval() {
-    new Numerator(this);
   }
 }
 

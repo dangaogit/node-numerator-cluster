@@ -7,7 +7,6 @@ export enum NumeratorStateEnum {
   pause,
   fulfilled,
   rejected,
-  // 等待执行，一般是定时任务会有
   waiting,
 }
 
@@ -21,7 +20,7 @@ export interface NumeratorOption<T = string> {
   /** 已完成粒子数 */
   fulfillCount: number;
   /** 失败粒子队列 */
-  failQueue: number[] | null;
+  failQueue: number[];
   locked: boolean;
   lockToken: string;
   load: number;
@@ -29,10 +28,6 @@ export interface NumeratorOption<T = string> {
   timer: number;
   lastRunTime: Date;
   state: NumeratorStateEnum;
-}
-
-export interface PushNumerator<T = string> {
-  (option: NumeratorOption<T>): Promise<boolean>;
 }
 
 const log = mainLog.getDeriveLog("Numerator");
@@ -55,21 +50,26 @@ export class Numerator<T> {
 
   private async start() {
     const config = await this.getNumeratorConfig();
-    const { state, key } = config;
-    const l = log.getDeriveLog(key + "");
 
-    this.option = config;
+    if (!config) {
+      return;
+    }
+
+    this.option = { ...config, failQueue: [], timer: 0, lastRunTime: new Date() };
+
+    const l = log.getDeriveLog(this.option.key + "");
+
+    l.info("Running task...");
 
     if (!(await this.lock())) {
       return l.warn("Lock failed!");
     }
 
-    if (state === NumeratorStateEnum.waiting) {
-      // 定时任务，判断间隔时间是否满足要求，满足时将状态更新至running
-      return this.runScheduleTask();
+    if (this.option.state === NumeratorStateEnum.waiting) {
+      await this.runTask();
     }
 
-    if (state !== NumeratorStateEnum.running) {
+    if (this.option.state !== NumeratorStateEnum.running) {
       return l.warn("This state not eq running!");
     }
 
@@ -95,7 +95,7 @@ export class Numerator<T> {
   }
 
   private async getNumeratorConfig() {
-    return this.cluster.option.numeratorClusterFactory();
+    return this.cluster.option.producer();
   }
 
   private complete() {
@@ -104,33 +104,40 @@ export class Numerator<T> {
   }
 
   private async exec() {
-    const { particleCount, particlePerReadCount, fulfillCount, context } = this.option;
-    const { performListener } = this.cluster.option;
-    const failedList: number[] = [];
-    const targetCount = fulfillCount + particlePerReadCount > particleCount ? particleCount : fulfillCount + particlePerReadCount > particleCount;
+    const { particlePerReadCount, fulfillCount: newFulfillCount, context } = this.option;
+    const fulfillCount = newFulfillCount - particlePerReadCount;
+    const { consumer } = this.cluster.option;
 
-    for (let i = fulfillCount; i < targetCount; i++) {
-      const result = await performListener(i, context);
-      if (!result) {
-        failedList.push(i);
-      }
+    const promises = [];
+    for (let i = fulfillCount; i < newFulfillCount; i++) {
+      promises.push(consumer(i, context));
     }
 
-    return failedList;
+    const results = await Promise.allSettled(promises);
+
+    return results
+      .map((result, index) => ({ result, index }))
+      .filter((item) => !item.result)
+      .map((item) => item.index);
   }
 
   private async pushFailedParticle(list: number[]) {
     const option = { ...this.option };
-    const { pushNumerator } = this.cluster.option;
+    const { pushState } = this.cluster.option;
 
-    option.failQueue ||= [];
+    option.failQueue = option.failQueue || [];
     option.failQueue.push(...list);
-    return pushNumerator(option);
+    const result = await pushState(option);
+    if (result) {
+      this.option = option;
+    }
+
+    return result;
   }
 
   private async updateProgress() {
     const option = { ...this.option };
-    const { pushNumerator } = this.cluster.option;
+    const { pushState } = this.cluster.option;
     const progress = option.fulfillCount + option.particlePerReadCount;
     if (progress > option.particleCount) {
       option.fulfillCount = option.particleCount;
@@ -138,18 +145,27 @@ export class Numerator<T> {
       option.fulfillCount = progress;
     }
 
-    return pushNumerator(option);
-  }
-
-  private async runScheduleTask() {
-    const option: NumeratorOption<T> = { ...this.option, fulfillCount: 0, failQueue: [] };
-    const { pushNumerator } = this.cluster.option;
-
-    if (Date.now() - option.lastRunTime.getTime() >= option.timer) {
-      option.state = NumeratorStateEnum.running;
+    const result = await pushState(option);
+    if (result) {
+      this.option = option;
     }
 
-    return pushNumerator(option);
+    return result;
+  }
+
+  private async runTask() {
+    const option: NumeratorOption<T> = { ...this.option, fulfillCount: 0, failQueue: [] };
+    const { pushState } = this.cluster.option;
+
+    /**
+     * timer小于0代表只执行一次
+     */
+    if (option.timer <= 0 || Date.now() - option.lastRunTime.getTime() >= option.timer) {
+      option.state = NumeratorStateEnum.running;
+      if (await pushState(option)) {
+        this.option = option;
+      }
+    }
   }
 
   private async lock() {
@@ -158,8 +174,13 @@ export class Numerator<T> {
     }
 
     const option: NumeratorOption<T> = { ...this.option, locked: true, lockToken: this.token };
-    const { pushNumerator } = this.cluster.option;
-    return pushNumerator(option);
+    const { pushState } = this.cluster.option;
+    const result = await pushState(option);
+    if (result) {
+      this.option = option;
+    }
+
+    return result;
   }
 
   private async unlock() {
@@ -168,14 +189,29 @@ export class Numerator<T> {
     }
 
     const option: NumeratorOption<T> = { ...this.option, locked: false };
-    const { pushNumerator } = this.cluster.option;
-    return pushNumerator(option);
+    const { pushState } = this.cluster.option;
+    const result = await pushState(option);
+    if (result) {
+      this.option = option;
+    }
+
+    return result;
   }
 
   private async done() {
-    const option: NumeratorOption<T> = { ...this.option, state: NumeratorStateEnum.fulfilled, lastRunTime: new Date() };
-    const { pushNumerator } = this.cluster.option;
-    return pushNumerator(option);
+    const option: NumeratorOption<T> = { ...this.option };
+    const { pushState } = this.cluster.option;
+
+    if (option.fulfillCount >= option.particleCount) {
+      option.lastRunTime = new Date();
+      option.state = option.timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
+    }
+    const result = await pushState(option);
+    if (result) {
+      this.option = option;
+    }
+
+    return result;
   }
 
   private getLoadSpace() {
