@@ -1,13 +1,20 @@
 import { mainLog } from "./log";
 import { Numerator, NumeratorOption } from "./numerator";
 
+export type PartialNotRequired<T, K extends keyof T, O extends keyof T = Exclude<keyof T, K>> = {
+  [P in K]?: T[P];
+} &
+  Pick<T, O>;
+
+export type ProducerOptionType<T> = PartialNotRequired<NumeratorOption<T>, "timer" | "failQueue" | "lastRunTime">;
+
 export interface NumeratorClusterOption<T> {
   /** 以毫秒记的任务检测定时器间隔 */
   taskSeekInterval: number;
   /** 负荷容量 */
   loadSize: number;
   /** 分子任务获取 */
-  producer(): Promise<Omit<NumeratorOption<T>, "timer" | "failQueue" | "lastRunTime"> | void>;
+  producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
   pushState(option: NumeratorOption<T>): Promise<boolean>;
   /** 分子消费 */

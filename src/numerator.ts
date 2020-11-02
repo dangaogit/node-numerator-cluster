@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { mainLog } from "./log";
-import NumeratorCluster from "./numerator-cluster";
+import NumeratorCluster, { ProducerOptionType } from "./numerator-cluster";
 export enum NumeratorStateEnum {
   init,
   running,
@@ -55,7 +55,7 @@ export class Numerator<T> {
       return;
     }
 
-    this.option = { ...config, failQueue: [], timer: 0, lastRunTime: new Date() };
+    this.initConfig(config);
 
     const l = log.getDeriveLog(this.option.key + "");
 
@@ -96,6 +96,10 @@ export class Numerator<T> {
 
   private async getNumeratorConfig() {
     return this.cluster.option.producer();
+  }
+
+  private initConfig(config: ProducerOptionType<T>) {
+    this.option = { ...config, lastRunTime: new Date(), timer: config.timer || 0, failQueue: config.failQueue || [] };
   }
 
   private complete() {
