@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { mainLog } from "./log";
-import NumeratorCluster, { ProducerOptionType } from "./numerator-cluster";
+import NumeratorCluster, { PartialRequired, ProducerOptionType } from "./numerator-cluster";
 export enum NumeratorStateEnum {
   init,
   running,
@@ -9,6 +9,8 @@ export enum NumeratorStateEnum {
   rejected,
   waiting,
 }
+
+export type PushStateOption<T = string> = PartialRequired<NumeratorOption<T>, "key">;
 
 export interface NumeratorOption<T = string> {
   /** 主码 */
@@ -67,31 +69,34 @@ export class Numerator<T> {
 
     if (this.option.state === NumeratorStateEnum.waiting) {
       await this.runTask();
+      if (!(await this.unlock())) {
+        return l.warn("Unlock failed!");
+      }
+    } else {
+      if (this.option.state !== NumeratorStateEnum.running) {
+        return l.warn("This state not eq running!");
+      }
+
+      if (!this.getLoadSpace()) {
+        return l.warn("There is not enough space to run this task!");
+      }
+
+      if (!(await this.updateProgress())) {
+        return l.warn("Update progress failed!");
+      }
+
+      if (!(await this.unlock())) {
+        return l.warn("Unlock failed!");
+      }
+
+      const execResult = await this.exec();
+
+      if (execResult.length > 0) {
+        this.pushFailedParticle(execResult);
+      }
+
+      this.complete();
     }
-
-    if (this.option.state !== NumeratorStateEnum.running) {
-      return l.warn("This state not eq running!");
-    }
-
-    if (!this.getLoadSpace()) {
-      return l.warn("There is not enough space to run this task!");
-    }
-
-    if (!(await this.updateProgress())) {
-      return l.warn("Update progress failed!");
-    }
-
-    if (!(await this.unlock())) {
-      return l.warn("Unlock failed!");
-    }
-
-    const execResult = await this.exec();
-
-    if (execResult.length > 0) {
-      this.pushFailedParticle(execResult);
-    }
-
-    this.complete();
   }
 
   private async getNumeratorConfig() {
@@ -126,24 +131,26 @@ export class Numerator<T> {
   }
 
   private async pushFailedParticle(list: number[]) {
-    const option = { ...this.option };
+    const { key } = this.option;
+    const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
 
     option.failQueue = option.failQueue || [];
     option.failQueue.push(...list);
     const result = await pushState(option);
     if (result) {
-      this.option = option;
+      Object.assign(this.option, option);
     }
 
     return result;
   }
 
   private async updateProgress() {
-    const option = { ...this.option };
+    const { key, fulfillCount, particleCount, particlePerReadCount } = this.option;
+    const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
-    const progress = option.fulfillCount + option.particlePerReadCount;
-    if (progress > option.particleCount) {
+    const progress = fulfillCount + particlePerReadCount;
+    if (progress > particleCount) {
       option.fulfillCount = option.particleCount;
     } else {
       option.fulfillCount = progress;
@@ -151,68 +158,75 @@ export class Numerator<T> {
 
     const result = await pushState(option);
     if (result) {
-      this.option = option;
+      Object.assign(this.option, option);
     }
 
     return result;
   }
 
   private async runTask() {
-    const option: NumeratorOption<T> = { ...this.option, fulfillCount: 0, failQueue: [] };
+    const { key, timer, lastRunTime } = this.option;
+    const option: PushStateOption<T> = { key, fulfillCount: 0, failQueue: [] };
     const { pushState } = this.cluster.option;
 
     /**
      * timer小于0代表只执行一次
      */
-    if (option.timer <= 0 || Date.now() - option.lastRunTime.getTime() >= option.timer) {
+    if (timer <= 0 || Date.now() - lastRunTime.getTime() >= timer) {
       option.state = NumeratorStateEnum.running;
-      if (await pushState(option)) {
-        this.option = option;
+      const result = await pushState(option);
+      if (result) {
+        Object.assign(this.option, option);
       }
+
+      return result;
     }
   }
 
   private async lock() {
-    if (this.option.locked) {
+    const { locked, key } = this.option;
+    if (locked) {
       return false;
     }
 
-    const option: NumeratorOption<T> = { ...this.option, locked: true, lockToken: this.token };
+    const option: PushStateOption<T> = { key, locked: true, lockToken: this.token };
     const { pushState } = this.cluster.option;
     const result = await pushState(option);
     if (result) {
-      this.option = option;
+      Object.assign(this.option, option);
     }
 
     return result;
   }
 
   private async unlock() {
-    if (!this.option.locked || this.option.lockToken !== this.token) {
+    const { key, locked, lockToken } = this.option;
+    if (!locked || lockToken !== this.token) {
       return false;
     }
 
-    const option: NumeratorOption<T> = { ...this.option, locked: false };
+    const option: PushStateOption<T> = { key, locked: false };
     const { pushState } = this.cluster.option;
     const result = await pushState(option);
     if (result) {
-      this.option = option;
+      Object.assign(this.option, option);
     }
 
     return result;
   }
 
   private async done() {
-    const option: NumeratorOption<T> = { ...this.option };
+    const { key, fulfillCount, particleCount, timer } = this.option;
+    const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
 
-    if (option.fulfillCount >= option.particleCount) {
+    if (fulfillCount >= particleCount) {
       option.lastRunTime = new Date();
-      option.state = option.timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
+      option.state = timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
     }
     const result = await pushState(option);
     if (result) {
-      this.option = option;
+      Object.assign(this.option, option);
     }
 
     return result;
