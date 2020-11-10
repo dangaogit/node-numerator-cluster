@@ -119,6 +119,7 @@ function signleTest() {
       return true;
     },
     async pushState(option) {
+      console.log("pushState", JSON.stringify(option));
       // console.log(`更新状态`, option.fulfillCount);
       // pushStateCount++;
       const config = configs.find((v) => v.key === option.key)!;
@@ -138,6 +139,6 @@ function signleTest() {
   clus.run();
 }
 
-// signleTest();
+signleTest();
 
-clusterTest();
+// clusterTest();

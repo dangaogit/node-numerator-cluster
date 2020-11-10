@@ -45,6 +45,7 @@ function getToken() {
 export class Numerator<T> {
   private token = getToken();
   private option!: NumeratorOption<T>;
+  private isLastBatch = false;
 
   constructor(private cluster: NumeratorCluster<T>) {
     this.start();
@@ -85,17 +86,30 @@ export class Numerator<T> {
         return l.warn("Update progress failed!");
       }
 
-      if (!(await this.unlock())) {
-        return l.warn("Unlock failed!");
+      if (this.isLastBatch) {
+        const execResult = await this.exec();
+        if (execResult.length > 0) {
+          await this.pushFailedParticle(execResult);
+        }
+
+        await this.complete();
+
+        if (!(await this.unlock())) {
+          return l.warn("Unlock failed!");
+        }
+      } else {
+        if (!(await this.unlock())) {
+          return l.warn("Unlock failed!");
+        }
+
+        const execResult = await this.exec();
+
+        if (execResult.length > 0) {
+          this.pushFailedParticle(execResult);
+        }
+
+        this.complete();
       }
-
-      const execResult = await this.exec();
-
-      if (execResult.length > 0) {
-        this.pushFailedParticle(execResult);
-      }
-
-      this.complete();
     }
   }
 
@@ -107,9 +121,9 @@ export class Numerator<T> {
     this.option = { ...config, lastRunTime: new Date(), timer: config.timer || 0, failQueue: config.failQueue || [] };
   }
 
-  private complete() {
+  private async complete() {
     this.revertLoadSpace();
-    this.done();
+    await this.done();
   }
 
   private async exec() {
@@ -151,9 +165,13 @@ export class Numerator<T> {
     const { pushState } = this.cluster.option;
     const progress = fulfillCount + particlePerReadCount;
     if (progress > particleCount) {
-      option.fulfillCount = option.particleCount;
+      option.fulfillCount = particleCount;
     } else {
       option.fulfillCount = progress;
+    }
+
+    if (option.fulfillCount === particleCount) {
+      this.isLastBatch = true;
     }
 
     const result = await pushState(option);
@@ -223,13 +241,13 @@ export class Numerator<T> {
     if (fulfillCount >= particleCount) {
       option.lastRunTime = new Date();
       option.state = timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
-    }
-    const result = await pushState(option);
-    if (result) {
-      Object.assign(this.option, option);
-    }
+      const result = await pushState(option);
+      if (result) {
+        Object.assign(this.option, option);
+      }
 
-    return result;
+      return result;
+    }
   }
 
   private getLoadSpace() {
