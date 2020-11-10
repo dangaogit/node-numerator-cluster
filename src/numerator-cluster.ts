@@ -19,7 +19,11 @@ export interface NumeratorClusterOption<T> {
   /** 分子任务获取 */
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
+<<<<<<< HEAD
   pushState(option: PartialRequired<NumeratorOption<T>, "key">): Promise<boolean>;
+=======
+  pushState(option: Pick<NumeratorOption<T>, "key">): Promise<boolean>;
+>>>>>>> dc37ba258507db90d031eb05124fa70851b46462
   /** 分子消费 */
   consumer(particle: number, context: T): Promise<boolean>;
 }

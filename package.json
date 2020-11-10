@@ -1,6 +1,10 @@
 {
   "name": "@dangao/node-numerator-cluster",
+<<<<<<< HEAD
   "version": "0.2.0",
+=======
+  "version": "0.1.0",
+>>>>>>> dc37ba258507db90d031eb05124fa70851b46462
   "description": "numerator-cluster for nodejs",
   "main": "dist/index.js",
   "repository": "https://github.com/dangaogit/node-numerator-cluster.git",
