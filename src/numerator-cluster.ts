@@ -11,7 +11,7 @@ export type PartialRequired<T, K extends keyof T> = Partial<T> & Pick<T, K>;
 
 export type ProducerOptionType<T> = PartialNotRequired<NumeratorOption<T>, "timer" | "failQueue" | "lastRunTime">;
 
-export interface NumeratorClusterOption<T> {
+interface NumeratorClusterOptionBase<T> {
   /** 以毫秒记的任务检测定时器间隔 */
   taskSeekInterval: number;
   /** 负荷容量 */
@@ -19,14 +19,22 @@ export interface NumeratorClusterOption<T> {
   /** 分子任务获取 */
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
-<<<<<<< HEAD
   pushState(option: PartialRequired<NumeratorOption<T>, "key">): Promise<boolean>;
-=======
-  pushState(option: Pick<NumeratorOption<T>, "key">): Promise<boolean>;
->>>>>>> dc37ba258507db90d031eb05124fa70851b46462
+}
+
+export interface NumeratorClusterOptionSingle<T> extends NumeratorClusterOptionBase<T> {
+  consumMode: "single";
   /** 分子消费 */
   consumer(particle: number, context: T): Promise<boolean>;
 }
+
+export interface NumeratorClusterOptionMultiple<T> extends NumeratorClusterOptionBase<T> {
+  consumMode: "multiple";
+  /** 分子消费 */
+  consumer(particles: number[], context: T): Promise<boolean[]>;
+}
+
+export type NumeratorClusterOption<T> = NumeratorClusterOptionSingle<T> | NumeratorClusterOptionMultiple<T>;
 
 export type NumeratorClusterStateType = "init" | "running" | "pause" | "stop";
 
@@ -46,7 +54,7 @@ export class NumeratorCluster<T> {
 
   public option!: NumeratorClusterOption<T>;
 
-  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState">) {
+  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState" | "consumMode">) {
     log.info("numerator cluster init...");
     this.option = {
       taskSeekInterval: 1000, // 1s

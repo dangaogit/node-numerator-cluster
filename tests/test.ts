@@ -75,6 +75,7 @@ function clusterTest() {
           });
         });
       },
+      consumMode: "single",
       async consumer(particle, context) {
         // console.log(`消费${particle}`);
         count++;
@@ -116,8 +117,9 @@ function signleTest() {
       console.log(`消费${particle}`);
       count++;
       await sleep(3000);
-      return true;
+      return [];
     },
+    consumMode: "multiple",
     async pushState(option) {
       console.log("pushState", JSON.stringify(option));
       // console.log(`更新状态`, option.fulfillCount);
@@ -138,7 +140,6 @@ function signleTest() {
 
   clus.run();
 }
-
 signleTest();
 
 // clusterTest();

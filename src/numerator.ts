@@ -129,14 +129,22 @@ export class Numerator<T> {
   private async exec() {
     const { particlePerReadCount, fulfillCount: newFulfillCount, context } = this.option;
     const fulfillCount = newFulfillCount - particlePerReadCount;
-    const { consumer } = this.cluster.option;
+    const { option } = this.cluster;
 
     const promises = [];
-    for (let i = fulfillCount; i < newFulfillCount; i++) {
-      promises.push(consumer(i, context));
+    let results: boolean[] = [];
+    if (option.consumMode === "single") {
+      for (let i = fulfillCount; i < newFulfillCount; i++) {
+        promises.push(option.consumer(i, context));
+      }
+      results = (await Promise.allSettled(promises)).map((v) => (v.status === "fulfilled" ? v.value : false));
+    } else {
+      const pool: number[] = [];
+      for (let i = fulfillCount; i < newFulfillCount; i++) {
+        pool.push(i);
+      }
+      results = await option.consumer(pool, context);
     }
-
-    const results = await Promise.allSettled(promises);
 
     return results
       .map((result, index) => ({ result, index }))
