@@ -19,7 +19,7 @@ interface NumeratorClusterOptionBase<T> {
   /** 分子任务获取 */
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
-  pushState(option: PartialRequired<NumeratorOption<T>, "key">): Promise<boolean>;
+  pushState(option: PartialRequired<NumeratorOption<T>, "key">, context: T): Promise<boolean>;
 }
 
 export interface NumeratorClusterOptionSingle<T> extends NumeratorClusterOptionBase<T> {

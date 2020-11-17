@@ -153,13 +153,13 @@ export class Numerator<T> {
   }
 
   private async pushFailedParticle(list: number[]) {
-    const { key } = this.option;
+    const { key, context } = this.option;
     const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
 
     option.failQueue = option.failQueue || [];
     option.failQueue.push(...list);
-    const result = await pushState(option);
+    const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
     }
@@ -168,7 +168,7 @@ export class Numerator<T> {
   }
 
   private async updateProgress() {
-    const { key, fulfillCount, particleCount, particlePerReadCount } = this.option;
+    const { key, fulfillCount, particleCount, particlePerReadCount, context } = this.option;
     const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
     const progress = fulfillCount + particlePerReadCount;
@@ -182,7 +182,7 @@ export class Numerator<T> {
       this.isLastBatch = true;
     }
 
-    const result = await pushState(option);
+    const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
     }
@@ -191,7 +191,7 @@ export class Numerator<T> {
   }
 
   private async runTask() {
-    const { key, timer, lastRunTime } = this.option;
+    const { key, timer, lastRunTime, context } = this.option;
     const option: PushStateOption<T> = { key, fulfillCount: 0, failQueue: [] };
     const { pushState } = this.cluster.option;
 
@@ -200,7 +200,7 @@ export class Numerator<T> {
      */
     if (timer <= 0 || Date.now() - lastRunTime.getTime() >= timer) {
       option.state = NumeratorStateEnum.running;
-      const result = await pushState(option);
+      const result = await pushState(option, context);
       if (result) {
         Object.assign(this.option, option);
       }
@@ -210,14 +210,14 @@ export class Numerator<T> {
   }
 
   private async lock() {
-    const { locked, key } = this.option;
+    const { locked, key, context } = this.option;
     if (locked) {
       return false;
     }
 
     const option: PushStateOption<T> = { key, locked: true, lockToken: this.token };
     const { pushState } = this.cluster.option;
-    const result = await pushState(option);
+    const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
     }
@@ -226,14 +226,14 @@ export class Numerator<T> {
   }
 
   private async unlock() {
-    const { key, locked, lockToken } = this.option;
+    const { key, locked, lockToken, context } = this.option;
     if (!locked || lockToken !== this.token) {
       return false;
     }
 
     const option: PushStateOption<T> = { key, locked: false };
     const { pushState } = this.cluster.option;
-    const result = await pushState(option);
+    const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
     }
@@ -242,14 +242,14 @@ export class Numerator<T> {
   }
 
   private async done() {
-    const { key, fulfillCount, particleCount, timer } = this.option;
+    const { key, fulfillCount, particleCount, timer, context } = this.option;
     const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
 
     if (fulfillCount >= particleCount) {
       option.lastRunTime = new Date();
       option.state = timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
-      const result = await pushState(option);
+      const result = await pushState(option, context);
       if (result) {
         Object.assign(this.option, option);
       }
