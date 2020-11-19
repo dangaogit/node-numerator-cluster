@@ -43,6 +43,8 @@ function getToken() {
 }
 
 export class Numerator<T> {
+  public static log = mainLog;
+
   private token = getToken();
   private option!: NumeratorOption<T>;
   private isLastBatch = false;
