@@ -120,6 +120,8 @@ export class Numerator<T> {
 
     this.revertLoadSpace();
 
+    await this.updateFulfillProgress();
+
     return results
       .map((result, index) => ({ result, index }))
       .filter((item) => !item.result)
