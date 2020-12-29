@@ -1,11 +1,6 @@
 import { mainLog } from "./log";
 import { Numerator, NumeratorOption } from "./numerator";
 
-// export type PartialNotRequired<T, K extends keyof T, O extends keyof T = Exclude<keyof T, K>> = {
-//   [P in K]?: T[P];
-// } &
-//   Pick<T, O>;
-
 export type PartialNotRequired<T, K extends keyof T> = Partial<T> & Omit<T, K>;
 export type PartialRequired<T, K extends keyof T> = Partial<T> & Pick<T, K>;
 
@@ -20,6 +15,7 @@ interface NumeratorClusterOptionBase<T> {
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
   pushState(option: PartialRequired<NumeratorOption<T>, "key">, context: T): Promise<boolean>;
+  queryConfig(key: string | number): Promise<ProducerOptionType<T> | void>;
 }
 
 export interface NumeratorClusterOptionSingle<T> extends NumeratorClusterOptionBase<T> {
@@ -54,7 +50,7 @@ export class NumeratorCluster<T> {
 
   public option!: NumeratorClusterOption<T>;
 
-  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState" | "consumMode">) {
+  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState" | "consumMode" | "queryConfig">) {
     log.info("numerator cluster init...");
     this.option = {
       taskSeekInterval: 1000, // 1s

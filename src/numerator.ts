@@ -1,3 +1,4 @@
+import { Log } from "@dangao/node-log";
 import { createHash } from "crypto";
 import { mainLog } from "./log";
 import NumeratorCluster, { PartialRequired, ProducerOptionType } from "./numerator-cluster";
@@ -19,6 +20,8 @@ export interface NumeratorOption<T = string> {
   particleCount: number;
   /** 每次读取粒子阈值 */
   particlePerReadCount: number;
+  /** 已分配粒子数 */
+  allocatedCount: number;
   /** 已完成粒子数 */
   fulfillCount: number;
   /** 失败粒子队列 */
@@ -45,9 +48,9 @@ function getToken() {
 export class Numerator<T> {
   public static log = mainLog;
 
-  private token = getToken();
+  private token?: string;
   private option!: NumeratorOption<T>;
-  private isLastBatch = false;
+  private log!: Log;
 
   constructor(private cluster: NumeratorCluster<T>) {
     this.start();
@@ -60,58 +63,31 @@ export class Numerator<T> {
       return;
     }
 
+    this.log = log.getDeriveLog(this.option.key + "");
     this.initConfig(config);
 
-    const l = log.getDeriveLog(this.option.key + "");
+    const { log: l } = this;
+    const { particleCount, fulfillCount, state } = this.option;
+    try {
+      l.info("Running task...");
+      await this.lock();
 
-    l.info("Running task...");
-
-    if (!(await this.lock())) {
-      return l.warn("Lock failed!");
-    }
-
-    if (this.option.state === NumeratorStateEnum.waiting) {
-      await this.runTask();
-      if (!(await this.unlock())) {
-        return l.warn("Unlock failed!");
-      }
-    } else {
-      if (this.option.state !== NumeratorStateEnum.running) {
-        return l.warn("This state not eq running!");
-      }
-
-      if (!this.getLoadSpace()) {
-        return l.warn("There is not enough space to run this task!");
-      }
-
-      if (!(await this.updateProgress())) {
-        return l.warn("Update progress failed!");
-      }
-
-      if (this.isLastBatch) {
-        const execResult = await this.exec();
-        if (execResult.length > 0) {
-          await this.pushFailedParticle(execResult);
+      if (state === NumeratorStateEnum.waiting) {
+        /** 启动任务并更新状态 */
+        await this.setStateRunning();
+      } else if (state === NumeratorStateEnum.running) {
+        if (fulfillCount >= particleCount) {
+          await this.taskDone();
+        } else if (this.getLoadSpace()) {
+          this.exec();
+          await this.updateProgress();
         }
-
-        await this.complete();
-
-        if (!(await this.unlock())) {
-          return l.warn("Unlock failed!");
-        }
-      } else {
-        if (!(await this.unlock())) {
-          return l.warn("Unlock failed!");
-        }
-
-        const execResult = await this.exec();
-
-        if (execResult.length > 0) {
-          this.pushFailedParticle(execResult);
-        }
-
-        this.complete();
       }
+
+      await this.unlock();
+    } catch (error) {
+      l.error(error);
+      await this.unlock();
     }
   }
 
@@ -123,30 +99,26 @@ export class Numerator<T> {
     this.option = { ...config, lastRunTime: new Date(), timer: config.timer || 0, failQueue: config.failQueue || [] };
   }
 
-  private async complete() {
-    this.revertLoadSpace();
-    await this.done();
-  }
-
   private async exec() {
-    const { particlePerReadCount, fulfillCount: newFulfillCount, context } = this.option;
-    const fulfillCount = newFulfillCount - particlePerReadCount;
+    const { particlePerReadCount, allocatedCount, context } = this.option;
     const { option } = this.cluster;
 
     const promises = [];
     let results: boolean[] = [];
     if (option.consumMode === "single") {
-      for (let i = fulfillCount; i < newFulfillCount; i++) {
+      for (let i = allocatedCount; i < allocatedCount + particlePerReadCount; i++) {
         promises.push(option.consumer(i, context));
       }
       results = (await Promise.allSettled(promises)).map((v) => (v.status === "fulfilled" ? v.value : false));
     } else {
       const pool: number[] = [];
-      for (let i = fulfillCount; i < newFulfillCount; i++) {
+      for (let i = allocatedCount; i < allocatedCount + particlePerReadCount; i++) {
         pool.push(i);
       }
       results = await option.consumer(pool, context);
     }
+
+    this.revertLoadSpace();
 
     return results
       .map((result, index) => ({ result, index }))
@@ -154,45 +126,69 @@ export class Numerator<T> {
       .map((item) => item.index);
   }
 
-  private async pushFailedParticle(list: number[]) {
-    const { key, context } = this.option;
-    const option: PushStateOption<T> = { key };
-    const { pushState } = this.cluster.option;
+  /** 更新完成进度 */
+  private async updateFulfillProgress() {
+    await this.lock();
 
-    option.failQueue = option.failQueue || [];
-    option.failQueue.push(...list);
-    const result = await pushState(option, context);
-    if (result) {
-      Object.assign(this.option, option);
+    try {
+      const { pushState, queryConfig } = this.cluster.option;
+      const { key, context, particlePerReadCount, particleCount } = this.option;
+      const config = await queryConfig(key);
+
+      if (!config) {
+        throw `Cannot find config '${key}'`;
+      }
+
+      const { fulfillCount } = config;
+      const option: PushStateOption<T> = { key };
+      const progress = fulfillCount + particlePerReadCount;
+
+      if (progress > particleCount) {
+        option.fulfillCount = particleCount;
+      } else {
+        option.fulfillCount = progress;
+      }
+
+      const result = await pushState(option, context);
+
+      if (result) {
+        Object.assign(this.option, option);
+      } else {
+        throw "Update fulfill-progress failed!";
+      }
+
+      return result;
+    } catch (error) {
+      this.log.error(error);
     }
 
-    return result;
+    await this.unlock();
   }
 
+  /** 更新分配进度 */
   private async updateProgress() {
-    const { key, fulfillCount, particleCount, particlePerReadCount, context } = this.option;
+    const { key, allocatedCount, particleCount, particlePerReadCount, context } = this.option;
     const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
-    const progress = fulfillCount + particlePerReadCount;
-    if (progress > particleCount) {
-      option.fulfillCount = particleCount;
-    } else {
-      option.fulfillCount = progress;
-    }
+    const progress = allocatedCount + particlePerReadCount;
 
-    if (option.fulfillCount === particleCount) {
-      this.isLastBatch = true;
+    if (progress > particleCount) {
+      option.allocatedCount = particleCount;
+    } else {
+      option.allocatedCount = progress;
     }
 
     const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
+    } else {
+      throw "Update progress failed!";
     }
 
     return result;
   }
 
-  private async runTask() {
+  private async setStateRunning() {
     const { key, timer, lastRunTime, context } = this.option;
     const option: PushStateOption<T> = { key, fulfillCount: 0, failQueue: [] };
     const { pushState } = this.cluster.option;
@@ -217,11 +213,15 @@ export class Numerator<T> {
       return false;
     }
 
+    this.token = getToken();
+
     const option: PushStateOption<T> = { key, locked: true, lockToken: this.token };
     const { pushState } = this.cluster.option;
     const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
+    } else {
+      throw "Lock failed!";
     }
 
     return result;
@@ -238,26 +238,29 @@ export class Numerator<T> {
     const result = await pushState(option, context);
     if (result) {
       Object.assign(this.option, option);
+    } else {
+      throw "Unlock failed!";
     }
 
     return result;
   }
 
-  private async done() {
-    const { key, fulfillCount, particleCount, timer, context } = this.option;
+  private async taskDone() {
+    const { key, timer, context } = this.option;
     const option: PushStateOption<T> = { key };
     const { pushState } = this.cluster.option;
 
-    if (fulfillCount >= particleCount) {
-      option.lastRunTime = new Date();
-      option.state = timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
-      const result = await pushState(option, context);
-      if (result) {
-        Object.assign(this.option, option);
-      }
+    option.lastRunTime = new Date();
+    option.state = timer > 0 ? NumeratorStateEnum.waiting : NumeratorStateEnum.fulfilled;
 
-      return result;
+    const result = await pushState(option, context);
+    if (result) {
+      Object.assign(this.option, option);
+    } else {
+      throw "Set done failed!";
     }
+
+    return result;
   }
 
   private getLoadSpace() {
@@ -266,6 +269,8 @@ export class Numerator<T> {
     const result = loadSize - load >= 0;
     if (result) {
       this.cluster.option.loadSize -= load;
+    } else {
+      this.log.warn("There is not enough space to run this task!");
     }
     return loadSize - load >= 0;
   }
