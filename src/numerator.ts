@@ -63,11 +63,11 @@ export class Numerator<T> {
       return;
     }
 
-    this.log = log.getDeriveLog(this.option.key + "");
     this.initConfig(config);
+    this.log = log.getDeriveLog(this.option.key + "");
 
     const { log: l } = this;
-    const { particleCount, fulfillCount, state } = this.option;
+    const { particleCount, allocatedCount, state } = this.option;
     try {
       l.info("Running task...");
       await this.lock();
@@ -76,7 +76,7 @@ export class Numerator<T> {
         /** 启动任务并更新状态 */
         await this.setStateRunning();
       } else if (state === NumeratorStateEnum.running) {
-        if (fulfillCount >= particleCount) {
+        if (allocatedCount >= particleCount) {
           await this.taskDone();
         } else if (this.getLoadSpace()) {
           this.exec();
@@ -130,6 +130,7 @@ export class Numerator<T> {
 
   /** 更新完成进度 */
   private async updateFulfillProgress() {
+    let result;
     await this.lock();
 
     try {
@@ -151,20 +152,19 @@ export class Numerator<T> {
         option.fulfillCount = progress;
       }
 
-      const result = await pushState(option, context);
+      result = await pushState(option, context);
 
       if (result) {
         Object.assign(this.option, option);
       } else {
         throw "Update fulfill-progress failed!";
       }
-
-      return result;
     } catch (error) {
       this.log.error(error);
     }
 
     await this.unlock();
+    return result;
   }
 
   /** 更新分配进度 */
