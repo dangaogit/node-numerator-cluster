@@ -15,7 +15,7 @@ interface NumeratorClusterOptionBase<T> {
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
   pushState(option: PartialRequired<NumeratorOption<T>, "key">, context: T): Promise<boolean>;
-  onSetState(newState: NumeratorStateEnum, oldState: NumeratorStateEnum): Promise<void>;
+  onSetState(newState: NumeratorStateEnum, oldState: NumeratorStateEnum, context: T): Promise<void>;
   queryConfig(key: string | number): Promise<ProducerOptionType<T> | void>;
 }
 

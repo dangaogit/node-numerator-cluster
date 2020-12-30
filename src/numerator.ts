@@ -67,7 +67,7 @@ export class Numerator<T> {
     this.log = log.getDeriveLog(this.option.key + "");
 
     const { log: l } = this;
-    const { particleCount, allocatedCount, state } = this.option;
+    const { particleCount, allocatedCount, state, context } = this.option;
     try {
       l.info("Running task...");
       await this.lock();
@@ -75,11 +75,11 @@ export class Numerator<T> {
       if (state === NumeratorStateEnum.waiting) {
         /** 启动任务并更新状态 */
         await this.setStateRunning();
-        await this.cluster.option.onSetState(this.option.state, state);
+        await this.cluster.option.onSetState(this.option.state, state, context);
       } else if (state === NumeratorStateEnum.running) {
         if (allocatedCount >= particleCount) {
           await this.taskDone();
-          await this.cluster.option.onSetState(this.option.state, state);
+          await this.cluster.option.onSetState(this.option.state, state, context);
         } else if (this.getLoadSpace()) {
           this.exec();
           await this.updateProgress();
