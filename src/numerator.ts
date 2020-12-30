@@ -75,9 +75,11 @@ export class Numerator<T> {
       if (state === NumeratorStateEnum.waiting) {
         /** 启动任务并更新状态 */
         await this.setStateRunning();
+        await this.cluster.option.onSetState(this.option.state, state);
       } else if (state === NumeratorStateEnum.running) {
         if (allocatedCount >= particleCount) {
           await this.taskDone();
+          await this.cluster.option.onSetState(this.option.state, state);
         } else if (this.getLoadSpace()) {
           this.exec();
           await this.updateProgress();

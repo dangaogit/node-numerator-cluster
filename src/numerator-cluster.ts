@@ -1,5 +1,5 @@
 import { mainLog } from "./log";
-import { Numerator, NumeratorOption } from "./numerator";
+import { Numerator, NumeratorOption, NumeratorStateEnum } from "./numerator";
 
 export type PartialNotRequired<T, K extends keyof T> = Partial<T> & Omit<T, K>;
 export type PartialRequired<T, K extends keyof T> = Partial<T> & Pick<T, K>;
@@ -15,6 +15,7 @@ interface NumeratorClusterOptionBase<T> {
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
   pushState(option: PartialRequired<NumeratorOption<T>, "key">, context: T): Promise<boolean>;
+  onSetState(newState: NumeratorStateEnum, oldState: NumeratorStateEnum): Promise<void>;
   queryConfig(key: string | number): Promise<ProducerOptionType<T> | void>;
 }
 
@@ -50,7 +51,7 @@ export class NumeratorCluster<T> {
 
   public option!: NumeratorClusterOption<T>;
 
-  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState" | "consumMode" | "queryConfig">) {
+  constructor(option: PartialRequired<NumeratorClusterOption<T>, "producer" | "consumer" | "pushState" | "consumMode" | "queryConfig" | "onSetState">) {
     log.info("numerator cluster init...");
     this.option = {
       taskSeekInterval: 1000, // 1s
