@@ -75,11 +75,11 @@ export class Numerator<T> {
       if (state === NumeratorStateEnum.waiting) {
         /** 启动任务并更新状态 */
         await this.setStateRunning();
-        await this.cluster.option.onSetState(this.option.state, state, context);
+        await this.cluster.option.onSetState(this.option.state, state, this.option);
       } else if (state === NumeratorStateEnum.running) {
         if (allocatedCount >= particleCount) {
           await this.taskDone();
-          await this.cluster.option.onSetState(this.option.state, state, context);
+          await this.cluster.option.onSetState(this.option.state, state, this.option);
         } else if (this.getLoadSpace()) {
           this.exec();
           await this.updateProgress();
@@ -109,7 +109,7 @@ export class Numerator<T> {
     let results: boolean[] = [];
     if (option.consumMode === "single") {
       for (let i = allocatedCount; i < allocatedCount + particlePerReadCount; i++) {
-        promises.push(option.consumer(i, context));
+        promises.push(option.consumer(i, context, this.option));
       }
       results = (await Promise.allSettled(promises)).map((v) => (v.status === "fulfilled" ? v.value : false));
     } else {
@@ -117,7 +117,7 @@ export class Numerator<T> {
       for (let i = allocatedCount; i < allocatedCount + particlePerReadCount; i++) {
         pool.push(i);
       }
-      results = await option.consumer(pool, context);
+      results = await option.consumer(pool, context, this.option);
     }
 
     this.revertLoadSpace();

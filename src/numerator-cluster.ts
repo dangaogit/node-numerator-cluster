@@ -15,20 +15,20 @@ interface NumeratorClusterOptionBase<T> {
   producer(): Promise<ProducerOptionType<T> | void>;
   /** 更新分子信息 */
   pushState(option: PartialRequired<NumeratorOption<T>, "key">, context: T): Promise<boolean>;
-  onSetState(newState: NumeratorStateEnum, oldState: NumeratorStateEnum, context: T): Promise<void>;
+  onSetState(newState: NumeratorStateEnum, oldState: NumeratorStateEnum, option: NumeratorOption<T>): Promise<void>;
   queryConfig(key: string | number): Promise<ProducerOptionType<T> | void>;
 }
 
 export interface NumeratorClusterOptionSingle<T> extends NumeratorClusterOptionBase<T> {
   consumMode: "single";
   /** 分子消费 */
-  consumer(particle: number, context: T): Promise<boolean>;
+  consumer(particle: number, context: T, option: NumeratorOption<T>): Promise<boolean>;
 }
 
 export interface NumeratorClusterOptionMultiple<T> extends NumeratorClusterOptionBase<T> {
   consumMode: "multiple";
   /** 分子消费 */
-  consumer(particles: number[], context: T): Promise<boolean[]>;
+  consumer(particles: number[], context: T, option: NumeratorOption<T>): Promise<boolean[]>;
 }
 
 export type NumeratorClusterOption<T> = NumeratorClusterOptionSingle<T> | NumeratorClusterOptionMultiple<T>;
