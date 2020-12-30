@@ -67,7 +67,7 @@ export class Numerator<T> {
     this.log = log.getDeriveLog(this.option.key + "");
 
     const { log: l } = this;
-    const { particleCount, allocatedCount, state, context } = this.option;
+    const { particleCount, allocatedCount, state } = this.option;
     try {
       l.info("Running task...");
       await this.lock();
@@ -194,7 +194,7 @@ export class Numerator<T> {
 
   private async setStateRunning() {
     const { key, timer, lastRunTime, context } = this.option;
-    const option: PushStateOption<T> = { key, fulfillCount: 0, failQueue: [] };
+    const option: PushStateOption<T> = { key, fulfillCount: 0, allocatedCount: 0, failQueue: [] };
     const { pushState } = this.cluster.option;
 
     /**
